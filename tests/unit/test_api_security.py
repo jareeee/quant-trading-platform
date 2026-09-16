@@ -81,6 +81,43 @@ def test_run_rejects_non_loopback_without_explicit_unsafe_opt_in(
     assert calls[0]["host"] == "0.0.0.0"
 
 
+def test_run_loads_database_host_and_port_from_dotenv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    dotenv = tmp_path / ".env"
+    dotenv.write_text(
+        "DATABASE_URL=sqlite:///configured.db\n"
+        "TRADING_API_HOST=localhost\n"
+        "TRADING_API_PORT=8123\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    for name in ("DATABASE_URL", "TRADING_API_HOST", "TRADING_API_PORT"):
+        monkeypatch.delenv(name, raising=False)
+
+    engines: list[str] = []
+    calls: list[dict[str, object]] = []
+
+    def fake_create_engine(database_url: str) -> object:
+        engines.append(database_url)
+        return object()
+
+    monkeypatch.setattr(
+        "quant_platform.api.app.create_engine",
+        fake_create_engine,
+    )
+    monkeypatch.setattr(
+        "quant_platform.api.app.create_session_factory", lambda engine: lambda: None
+    )
+    monkeypatch.setattr("uvicorn.run", lambda app, **kwargs: calls.append({"app": app, **kwargs}))
+
+    run()
+
+    assert engines == ["sqlite:///configured.db"]
+    assert calls[0]["host"] == "localhost"
+    assert calls[0]["port"] == 8123
+
+
 def test_api_import_isolated_from_exchange_and_ccxt() -> None:
     code = (
         "import sys; import quant_platform.api.app; "

@@ -121,7 +121,7 @@ def create_app(services: CliServices | None = None) -> typer.Typer:
         counts = {name: 0 for name in ("completed", "failed", "pending", "processing")}
         with resolved.session_factory() as session:
             heartbeat = session.scalar(
-                select(Heartbeat).where(Heartbeat.service_name == "core")
+                select(Heartbeat).where(Heartbeat.service_name == "trading-core")
             )
             rows = session.execute(
                 select(Command.status, func.count(Command.id)).group_by(Command.status)
@@ -152,7 +152,7 @@ def create_app(services: CliServices | None = None) -> typer.Typer:
                     "age_seconds": age.total_seconds() if age is not None else None,
                     "last_seen_at": _iso_utc(last_seen_at),
                     "reason": reason,
-                    "service_name": "core",
+                    "service_name": "trading-core",
                     "status": heartbeat.status if heartbeat is not None else None,
                 },
             }

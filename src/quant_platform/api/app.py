@@ -1,11 +1,11 @@
 import ipaddress
-import os
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -28,6 +28,15 @@ from quant_platform.db.models import (
     StrategyRun,
 )
 from quant_platform.db.session import create_engine, create_session_factory
+
+
+class ApiRuntimeSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    database_url: str = "sqlite:///quant-trading-platform.db"
+    trading_api_host: str = "127.0.0.1"
+    trading_api_port: int = 8000
+    trading_api_unsafe_allow_non_loopback: bool = False
 
 
 def _timestamp(value: datetime | None) -> str | None:
@@ -309,19 +318,17 @@ def run(
     """Run the local read API, refusing remote exposure unless explicitly opted in."""
     import uvicorn
 
-    selected_host = host or os.getenv("TRADING_API_HOST") or "127.0.0.1"
-    unsafe_env = os.getenv("TRADING_API_UNSAFE_ALLOW_NON_LOOPBACK", "").lower()
-    unsafe_enabled = unsafe_allow_non_loopback or unsafe_env in {"1", "true", "yes"}
+    settings = ApiRuntimeSettings()
+    selected_host = host or settings.trading_api_host
+    unsafe_enabled = (
+        unsafe_allow_non_loopback or settings.trading_api_unsafe_allow_non_loopback
+    )
     if not _is_loopback(selected_host) and not unsafe_enabled:
         raise ValueError("non-loopback API host requires explicit unsafe opt-in")
 
-    database_url = os.getenv(
-        "QUANT_PLATFORM_DATABASE_URL", "sqlite:///quant-trading-platform.db"
-    )
-    engine = create_engine(database_url)
+    engine = create_engine(settings.database_url)
     app = create_app(
         session_factory=create_session_factory(engine),
         clock=lambda: datetime.now(UTC),
     )
-    port = int(os.getenv("TRADING_API_PORT", "8000"))
-    uvicorn.run(app, host=selected_host, port=port)
+    uvicorn.run(app, host=selected_host, port=settings.trading_api_port)
