@@ -75,6 +75,26 @@ def test_process_next_commits_claim_before_handler_and_completes(session_factory
         assert stored.error is None
 
 
+def test_processed_at_is_recorded_after_handler_finishes(session_factory: Any) -> None:
+    started_at = PROCESSED_AT
+    finished_at = PROCESSED_AT + timedelta(seconds=30)
+    clock_values = iter((started_at, finished_at))
+
+    with session_factory() as session:
+        command = enqueue(session)
+        result = CommandProcessor(
+            session,
+            {"start": lambda envelope: None},
+            clock=lambda: next(clock_values),
+        ).process_next()
+
+        assert result.status is ProcessStatus.COMPLETED
+        session.expire_all()
+        assert session.get_one(Command, command.id).processed_at == finished_at.replace(
+            tzinfo=None
+        )
+
+
 def test_handler_database_failure_is_sanitized_and_session_recovers(session_factory: Any) -> None:
     with session_factory() as session:
         failed_command = enqueue(session, command_type="explode", key="first")

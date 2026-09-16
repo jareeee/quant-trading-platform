@@ -70,7 +70,8 @@ class Scheduler:
                 continue
             elapsed_intervals = (now - schedule.anchor) // schedule.interval
             boundary = schedule.anchor + elapsed_intervals * schedule.interval
-            if self._dispatched.get(schedule.asset_config_id) == boundary:
+            last_dispatched = self._dispatched.get(schedule.asset_config_id)
+            if last_dispatched is not None and boundary <= last_dispatched:
                 continue
             try:
                 self._callback(schedule.asset_config_id, boundary)

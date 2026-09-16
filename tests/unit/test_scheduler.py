@@ -118,6 +118,21 @@ def test_replacing_changed_schedule_resets_only_its_dedupe_state() -> None:
     assert dispatched == [(1, now), (2, now), (1, now)]
 
 
+def test_tick_does_not_redispatch_an_older_boundary_after_clock_moves_backward() -> None:
+    dispatched: list[tuple[int, datetime]] = []
+    scheduler = Scheduler(
+        (AssetSchedule(1, timedelta(minutes=5), ANCHOR),),
+        lambda *dispatch: dispatched.append(dispatch),
+    )
+
+    newer = ANCHOR + timedelta(minutes=15)
+    older = ANCHOR + timedelta(minutes=10)
+    scheduler.tick(newer)
+    scheduler.tick(older)
+
+    assert dispatched == [(1, newer)]
+
+
 def test_tick_rejects_naive_and_non_utc_values() -> None:
     scheduler = Scheduler((), lambda asset_id, boundary: None)
 

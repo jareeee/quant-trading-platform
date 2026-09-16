@@ -67,9 +67,7 @@ class CommandProcessor:
         self._clock = clock
 
     def process_next(self) -> ProcessResult:
-        processed_at = self._clock()
-        if processed_at.tzinfo is None or processed_at.utcoffset() != timedelta(0):
-            raise ValueError("clock must return a UTC-aware datetime")
+        self._validated_now()
 
         command = self._repository.claim_next()
         if command is None:
@@ -80,13 +78,14 @@ class CommandProcessor:
         self._session.commit()
         handler = self._handlers.get(envelope.command_type)
         if handler is None:
-            return self._fail(envelope, processed_at)
+            return self._fail(envelope, self._validated_now())
 
         try:
             handler(envelope)
         except Exception:
-            return self._fail(envelope, processed_at)
+            return self._fail(envelope, self._validated_now())
 
+        processed_at = self._validated_now()
         updated = self._repository.mark_completed(envelope.id, processed_at=processed_at)
         self._session.commit()
         status = ProcessStatus.COMPLETED if updated else ProcessStatus.CLAIM_LOST
@@ -103,6 +102,12 @@ class CommandProcessor:
         status = ProcessStatus.FAILED if updated else ProcessStatus.CLAIM_LOST
         error = GENERIC_PROCESSING_ERROR if updated else None
         return ProcessResult(status, envelope, error)
+
+    def _validated_now(self) -> datetime:
+        value = self._clock()
+        if value.tzinfo is None or value.utcoffset() != timedelta(0):
+            raise ValueError("clock must return a UTC-aware datetime")
+        return value
 
     @staticmethod
     def _to_envelope(command: Command) -> CommandEnvelope:
