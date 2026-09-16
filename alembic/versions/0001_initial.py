@@ -58,16 +58,22 @@ def upgrade() -> None:
     op.create_table(
         "strategy_runs",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("asset_config_id", sa.Integer()),
+        sa.Column("asset_config_id", sa.Integer(), nullable=False),
         sa.Column("strategy_name", sa.String(100), nullable=False),
         sa.Column("status", sa.String(30), nullable=False),
         sa.Column("idempotency_key", sa.String(255), nullable=False),
         sa.Column("parameters", sa.JSON(), nullable=False),
+        sa.Column("scheduled_boundary", timestamp, nullable=False),
         sa.Column("started_at", timestamp, nullable=False),
         sa.Column("ended_at", timestamp),
         *timestamp_columns(),
-        sa.ForeignKeyConstraint(["asset_config_id"], ["asset_configs.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(["asset_config_id"], ["asset_configs.id"], ondelete="RESTRICT"),
         sa.UniqueConstraint("idempotency_key", name="uq_strategy_runs_idempotency_key"),
+        sa.UniqueConstraint(
+            "asset_config_id",
+            "scheduled_boundary",
+            name="uq_strategy_runs_asset_boundary",
+        ),
     )
     op.create_table(
         "signals",

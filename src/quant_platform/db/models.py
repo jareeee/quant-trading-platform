@@ -69,16 +69,22 @@ class StrategyRun(TimestampMixin, Base):
     __tablename__ = "strategy_runs"
     __table_args__ = (
         UniqueConstraint("idempotency_key", name="uq_strategy_runs_idempotency_key"),
+        UniqueConstraint(
+            "asset_config_id",
+            "scheduled_boundary",
+            name="uq_strategy_runs_asset_boundary",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    asset_config_id: Mapped[int | None] = mapped_column(
-        ForeignKey("asset_configs.id", ondelete="SET NULL")
+    asset_config_id: Mapped[int] = mapped_column(
+        ForeignKey("asset_configs.id", ondelete="RESTRICT"), nullable=False
     )
     strategy_name: Mapped[str] = mapped_column(String(100), nullable=False)
     status: Mapped[str] = mapped_column(String(30), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
     parameters: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    scheduled_boundary: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )

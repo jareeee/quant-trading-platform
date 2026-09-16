@@ -31,7 +31,10 @@ EXPECTED_TABLES = {
 EXPECTED_UNIQUE_COLUMNS: dict[str, set[tuple[str, ...]]] = {
     "exchange_configs": {("name",)},
     "asset_configs": {("exchange_config_id", "symbol")},
-    "strategy_runs": {("idempotency_key",)},
+    "strategy_runs": {
+        ("idempotency_key",),
+        ("asset_config_id", "scheduled_boundary"),
+    },
     "signals": {("idempotency_key",)},
     "orders": {("client_order_id",)},
     "fills": {("order_id", "exchange_fill_id")},
