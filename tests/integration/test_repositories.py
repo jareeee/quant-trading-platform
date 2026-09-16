@@ -226,9 +226,9 @@ def test_commands_enqueue_idempotently_and_claim_fifo_across_sessions(
         requested_at=requested_at,
     )
     duplicate = repository.enqueue(
-        command_type="ignored",
+        command_type="start",
         idempotency_key="command-1",
-        payload={},
+        payload={"asset": 1},
         requested_at=requested_at + timedelta(minutes=1),
     )
     third = repository.enqueue(

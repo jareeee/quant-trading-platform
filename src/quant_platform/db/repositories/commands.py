@@ -16,6 +16,10 @@ class CommandEnqueueResult:
     command: Command
 
 
+class CommandIdempotencyConflictError(ValueError):
+    """Raised when an idempotency key is reused for a different command intent."""
+
+
 class CommandRepository:
     """Idempotent FIFO command queue persistence."""
 
@@ -54,6 +58,10 @@ class CommandRepository:
         existing = self._session.scalars(
             select(Command).where(Command.idempotency_key == idempotency_key)
         ).one()
+        if existing.command_type != command_type or existing.payload != payload:
+            raise CommandIdempotencyConflictError(
+                "idempotency key is already bound to a different command"
+            )
         return CommandEnqueueResult(outcome=CreateOutcome.DUPLICATE, command=existing)
 
     def claim_next(self) -> Command | None:
