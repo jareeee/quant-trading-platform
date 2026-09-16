@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select, update
@@ -30,6 +30,8 @@ class CommandRepository:
         payload: dict[str, Any],
         requested_at: datetime,
     ) -> CommandEnqueueResult:
+        if requested_at.tzinfo is None or requested_at.utcoffset() != timedelta(0):
+            raise ValueError("requested_at must be UTC-aware")
         statement = (
             insert(Command)
             .values(
@@ -74,3 +76,37 @@ class CommandRepository:
         command = self._session.get_one(Command, command_id)
         self._session.refresh(command)
         return command
+
+    def mark_completed(self, command_id: int, *, processed_at: datetime) -> bool:
+        return self._mark_finished(
+            command_id,
+            status="completed",
+            processed_at=processed_at,
+            error=None,
+        )
+
+    def mark_failed(self, command_id: int, *, processed_at: datetime, error: str) -> bool:
+        return self._mark_finished(
+            command_id,
+            status="failed",
+            processed_at=processed_at,
+            error=error,
+        )
+
+    def _mark_finished(
+        self,
+        command_id: int,
+        *,
+        status: str,
+        processed_at: datetime,
+        error: str | None,
+    ) -> bool:
+        if processed_at.tzinfo is None or processed_at.utcoffset() != timedelta(0):
+            raise ValueError("processed_at must be UTC-aware")
+        statement = (
+            update(Command)
+            .where(Command.id == command_id, Command.status == "processing")
+            .values(status=status, processed_at=processed_at, error=error)
+            .returning(Command.id)
+        )
+        return self._session.execute(statement).scalar_one_or_none() is not None
