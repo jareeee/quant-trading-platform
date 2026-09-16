@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from quant_platform.config import Settings, TradingMode
 from quant_platform.db.models import AssetConfig, Command, Heartbeat, Position
-from quant_platform.db.repositories import CommandRepository
+from quant_platform.db.repositories import CommandIdempotencyConflictError, CommandRepository
 from quant_platform.db.session import create_engine, create_session_factory
 
 SessionFactory = Callable[[], Session]
@@ -213,12 +213,17 @@ def create_app(services: CliServices | None = None) -> typer.Typer:
             if asset_id is not None and session.get(AssetConfig, asset_id) is None:
                 _write_json({"asset_id": asset_id, "error": "asset_not_found"})
                 raise typer.Exit(code=1)
-            result = CommandRepository(session).enqueue(
-                command_type=command_type,
-                idempotency_key=key,
-                payload=payload,
-                requested_at=resolved.clock(),
-            )
+            try:
+                result = CommandRepository(session).enqueue(
+                    command_type=command_type,
+                    idempotency_key=key,
+                    payload=payload,
+                    requested_at=resolved.clock(),
+                )
+            except CommandIdempotencyConflictError:
+                session.rollback()
+                _write_json({"error": "idempotency_conflict"})
+                raise typer.Exit(code=1) from None
             session.commit()
         _write_json(
             {

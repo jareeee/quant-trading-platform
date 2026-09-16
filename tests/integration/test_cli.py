@@ -262,6 +262,30 @@ def test_resume_reports_duplicate_idempotency_without_second_command(
         assert session.scalar(select(func.count()).select_from(Command)) == 1
 
 
+def test_idempotency_key_reuse_for_different_intent_is_rejected(
+    session_factory: Callable[[], Session],
+) -> None:
+    asset_id = add_asset_config(session_factory)
+    app = app_for(session_factory)
+
+    first = CliRunner().invoke(
+        app,
+        ["pause", str(asset_id), "--idempotency-key", "shared-key"],
+    )
+    conflicting = CliRunner().invoke(
+        app,
+        ["resume", str(asset_id), "--idempotency-key", "shared-key"],
+    )
+
+    assert first.exit_code == 0
+    assert conflicting.exit_code == 1
+    assert conflicting.stdout == '{"error":"idempotency_conflict"}\n'
+    with session_factory() as session:
+        commands = list(session.scalars(select(Command)))
+        assert len(commands) == 1
+        assert commands[0].command_type == "pause"
+
+
 def test_reconcile_enqueues_all_assets_or_one_asset_explicitly(
     session_factory: Callable[[], Session],
 ) -> None:
