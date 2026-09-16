@@ -63,7 +63,9 @@ def add_asset_config(session_factory: Callable[[], Session]) -> int:
 def test_status_reports_fresh_core_heartbeat_and_queue_counts(
     session_factory: Callable[[], Session],
 ) -> None:
-    HeartbeatService(session_factory, "core", clock=lambda: NOW).publish(HeartbeatStatus.RUNNING)
+    HeartbeatService(session_factory, "trading-core", clock=lambda: NOW).publish(
+        HeartbeatStatus.RUNNING
+    )
     with session_factory() as session:
         session.add_all(
             [
@@ -92,7 +94,7 @@ def test_status_reports_fresh_core_heartbeat_and_queue_counts(
     assert result.stdout == (
         '{"command_counts":{"completed":1,"failed":0,"pending":1,"processing":0},'
         '"healthy":true,"heartbeat":{"age_seconds":0.0,"last_seen_at":'
-        '"2026-09-17T08:30:00Z","reason":null,"service_name":"core",'
+        '"2026-09-17T08:30:00Z","reason":null,"service_name":"trading-core",'
         '"status":"running"}}\n'
     )
     with session_factory() as session:
@@ -108,7 +110,7 @@ def test_status_reports_missing_heartbeat_and_exits_nonzero(
     assert result.stdout == (
         '{"command_counts":{"completed":0,"failed":0,"pending":0,"processing":0},'
         '"healthy":false,"heartbeat":{"age_seconds":null,"last_seen_at":null,'
-        '"reason":"missing","service_name":"core","status":null}}\n'
+        '"reason":"missing","service_name":"trading-core","status":null}}\n'
     )
 
 
@@ -116,7 +118,7 @@ def test_status_reports_stale_heartbeat_and_exits_nonzero(
     session_factory: Callable[[], Session],
 ) -> None:
     heartbeat_at = NOW - timedelta(seconds=31)
-    HeartbeatService(session_factory, "core", clock=lambda: heartbeat_at).publish(
+    HeartbeatService(session_factory, "trading-core", clock=lambda: heartbeat_at).publish(
         HeartbeatStatus.RUNNING
     )
 
