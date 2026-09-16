@@ -165,7 +165,7 @@ def test_callback_failure_publishes_degraded_then_continues_without_lock_leak(
         nonlocal attempts
         attempts += 1
         if attempts == 1:
-            raise RuntimeError("temporary failure")
+            raise RuntimeError("api_key=top-secret")
         daemon.request_stop()
 
     lock_path = tmp_path / "callback.lock"
@@ -189,7 +189,7 @@ def test_callback_failure_publishes_degraded_then_continues_without_lock_leak(
         HeartbeatStatus.STOPPED,
     ]
     assert heartbeat.published[2][1] == {
-        "error": "temporary failure",
+        "error": "daemon iteration failed",
         "error_type": "RuntimeError",
     }
     with InstanceLock(lock_path):

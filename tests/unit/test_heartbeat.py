@@ -1,6 +1,7 @@
 from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from sqlalchemy import func, select
@@ -72,8 +73,9 @@ def test_running_fresh_heartbeat_is_healthy_and_report_is_immutable(tmp_path: Pa
     assert report.details == {"nested": ("safe",)}
     with pytest.raises(FrozenInstanceError):
         report.healthy = False  # type: ignore[misc]
+    mutable_details = cast(Any, report.details)
     with pytest.raises(TypeError):
-        report.details["changed"] = True  # type: ignore[index]
+        mutable_details["changed"] = True
     engine.dispose()
 
 

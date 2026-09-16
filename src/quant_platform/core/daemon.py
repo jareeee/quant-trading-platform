@@ -155,7 +155,7 @@ class CoreDaemon:
                 except Exception as error:
                     self._heartbeat.publish(
                         HeartbeatStatus.DEGRADED,
-                        {"error": str(error), "error_type": type(error).__name__},
+                        {"error": "daemon iteration failed", "error_type": type(error).__name__},
                     )
                 else:
                     if not self._stop_event.is_set():
