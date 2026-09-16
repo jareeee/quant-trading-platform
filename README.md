@@ -14,7 +14,7 @@ Local-first automated quant trading platform with an independent Python core and
 ## Development
 
 ```bash
-~/.hermes/bin/uv venv .venv --python 3.11
-~/.hermes/bin/uv pip install --python .venv/bin/python -e '.[dev]'
-env -u PYTHONPATH -u PYTHONHOME .venv/bin/python -m pytest
+uv venv .venv --python 3.11
+uv pip install --python .venv/bin/python -e '.[dev]'
+.venv/bin/python -m pytest
 ```
