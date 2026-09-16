@@ -97,6 +97,14 @@ def test_strategy_context_copies_candles_to_a_tuple() -> None:
             "fully closed",
         ),
         (
+            {
+                "position": Position(
+                    "ETH/USDT", Decimal("1"), Decimal("100")
+                )
+            },
+            "position symbol",
+        ),
+        (
             {"scheduled_boundary": BOUNDARY.replace(tzinfo=None)},
             "scheduled_boundary must be UTC-aware",
         ),

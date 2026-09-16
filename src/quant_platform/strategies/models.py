@@ -88,6 +88,8 @@ class StrategyContext:
             if candle.opened_at + duration > self.scheduled_boundary:
                 raise ValueError("candles must be fully closed before the scheduled boundary")
             previous = candle.opened_at
+        if self.position is not None and self.position.symbol != self.symbol:
+            raise ValueError("position symbol must match context symbol")
         if not isinstance(self.parameters, Mapping):
             raise ValueError("parameters must be a mapping")
         object.__setattr__(self, "parameters", _freeze(self.parameters))
