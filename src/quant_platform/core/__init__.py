@@ -17,10 +17,19 @@ from quant_platform.core.reconciliation import (
     ReconciliationError,
     ReconciliationReport,
 )
+from quant_platform.core.recovery import (
+    AssetRecoveryResult,
+    RecoveryCoordinator,
+    RecoveryPolicy,
+    RecoveryReport,
+    RecoverySchedule,
+    RecoveryStatus,
+)
 from quant_platform.core.scheduler import AssetSchedule, Scheduler
 
 __all__ = [
     "AlreadyRunningError",
+    "AssetRecoveryResult",
     "AssetSchedule",
     "CommandEnvelope",
     "CommandProcessor",
@@ -36,5 +45,10 @@ __all__ = [
     "Reconciler",
     "ReconciliationError",
     "ReconciliationReport",
+    "RecoveryCoordinator",
+    "RecoveryPolicy",
+    "RecoveryReport",
+    "RecoverySchedule",
+    "RecoveryStatus",
     "Scheduler",
 ]
