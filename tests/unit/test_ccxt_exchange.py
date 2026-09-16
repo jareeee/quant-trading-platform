@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-import ccxt
+import ccxt  # type: ignore[import-untyped]
 import pytest
 
 from quant_platform.exchange import (
@@ -184,6 +184,27 @@ def test_fetch_positions_signs_short_quantity() -> None:
     )
 
 
+def test_fetch_positions_forwards_exchange_specific_options() -> None:
+    client = StubCcxtClient()
+    client.responses["fetch_positions"] = []
+    exchange = CcxtExchange(
+        client,
+        clock=lambda: NOW,
+        options=CcxtExchangeOptions(
+            method_params={"fetch_positions": {"productType": "USDT-FUTURES"}}
+        ),
+    )
+
+    assert exchange.fetch_positions() == ()
+    assert client.calls == [
+        (
+            "fetch_positions",
+            (None,),
+            {"params": {"productType": "USDT-FUTURES"}},
+        )
+    ]
+
+
 def test_balance_and_position_reject_missing_required_fields() -> None:
     client = StubCcxtClient()
     exchange = CcxtExchange(client, clock=lambda: NOW)
@@ -284,6 +305,31 @@ def test_submit_order_forwards_precision_client_id_and_type(
             {"params": {"positionIdx": 1, "clientOid": "strategy-1"}},
         )
     ]
+
+
+def test_submit_order_uses_requested_client_id_when_exchange_omits_it() -> None:
+    client = StubCcxtClient()
+    client.responses["create_order"] = order_response(
+        clientOrderId=None,
+        type="market",
+        status="closed",
+        filled="1",
+        amount="1",
+        average="100",
+    )
+    exchange = CcxtExchange(client, clock=lambda: NOW)
+
+    result = exchange.submit_order(
+        OrderRequest(
+            "BTC/USDT",
+            OrderSide.BUY,
+            OrderType.MARKET,
+            Decimal("1"),
+            "requested-client-id",
+        )
+    )
+
+    assert result.client_order_id == "requested-client-id"
 
 
 def test_cancel_and_fetch_fills_preserve_exchange_ids_and_timestamps() -> None:

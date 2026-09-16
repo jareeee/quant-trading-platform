@@ -119,7 +119,12 @@ class CcxtExchange:
 
     def fetch_positions(self) -> tuple[Position, ...]:
         try:
-            response = self._client.fetch_positions()
+            params = self._params("fetch_positions")
+            response = (
+                self._client.fetch_positions(None, params=params)
+                if params
+                else self._client.fetch_positions()
+            )
             if not isinstance(response, Sequence) or isinstance(response, (str, bytes)):
                 raise MalformedExchangeResponse("malformed positions response")
             return tuple(_parse_position(item) for item in response)
@@ -148,7 +153,9 @@ class CcxtExchange:
                 price,
                 params=params,
             )
-            return _parse_order(response)
+            return _parse_order(
+                response, client_order_id_fallback=request.client_order_id
+            )
         except Exception as error:
             raise _normalize_error(error) from None
 
@@ -201,7 +208,9 @@ def _parse_orders(response: object) -> tuple[OrderResult, ...]:
     return tuple(_parse_order(item) for item in response)
 
 
-def _parse_order(item: object) -> OrderResult:
+def _parse_order(
+    item: object, *, client_order_id_fallback: str | None = None
+) -> OrderResult:
     if not isinstance(item, Mapping):
         raise MalformedExchangeResponse("malformed order")
     statuses = {
@@ -217,9 +226,15 @@ def _parse_order(item: object) -> OrderResult:
         filled = _decimal(item["filled"], "order filled")
         average_value = item["average"]
         average = None if average_value is None else _decimal(average_value, "order average")
+        raw_client_order_id = item.get("clientOrderId")
+        client_order_id = (
+            raw_client_order_id
+            if isinstance(raw_client_order_id, str) and raw_client_order_id.strip()
+            else client_order_id_fallback
+        )
         return OrderResult(
             exchange_order_id=_text(item["id"], "order id"),
-            client_order_id=_text(item["clientOrderId"], "client order id"),
+            client_order_id=_text(client_order_id, "client order id"),
             symbol=_text(item["symbol"], "order symbol"),
             side=OrderSide(_text(item["side"], "order side")),
             order_type=OrderType(_text(item["type"], "order type")),
