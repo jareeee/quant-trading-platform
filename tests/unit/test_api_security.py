@@ -20,7 +20,7 @@ def session_factory(tmp_path: Path) -> Iterator[Callable[[], Session]]:
     engine.dispose()
 
 
-def test_openapi_exposes_only_read_methods(
+def test_openapi_exposes_versioned_typed_read_and_mutation_contracts(
     session_factory: Callable[[], Session],
 ) -> None:
     app = create_app(
@@ -28,28 +28,49 @@ def test_openapi_exposes_only_read_methods(
         clock=lambda: datetime(2026, 9, 17, tzinfo=UTC),
     )
 
-    paths = app.openapi()["paths"]
+    schema = app.openapi()
+    paths = schema["paths"]
 
     assert set(paths) == {
         "/api/v1/status",
         "/api/v1/assets",
         "/api/v1/assets/{asset_id}",
+        "/api/v1/assets/{asset_id}/commands/pause",
+        "/api/v1/assets/{asset_id}/commands/resume",
+        "/api/v1/assets/{asset_id}/commands/close",
+        "/api/v1/core/commands/reconcile",
+        "/api/v1/commands/{command_id}",
         "/api/v1/positions",
         "/api/v1/runs",
         "/api/v1/orders",
         "/api/v1/fills",
     }
-    assert {method for operations in paths.values() for method in operations} <= {
-        "get",
-        "head",
-        "options",
-    }
-    assert all(
-        operations["get"]["responses"]["200"]["content"]["application/json"]["schema"].get(
-            "$ref"
+    assert set(paths["/api/v1/assets"]) == {"get", "post"}
+    assert set(paths["/api/v1/assets/{asset_id}"]) == {"get", "patch"}
+    for path in (
+        "/api/v1/assets/{asset_id}/commands/pause",
+        "/api/v1/assets/{asset_id}/commands/resume",
+        "/api/v1/assets/{asset_id}/commands/close",
+        "/api/v1/core/commands/reconcile",
+    ):
+        operation = paths[path]["post"]
+        assert operation["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+        idempotency = next(
+            parameter
+            for parameter in operation["parameters"]
+            if parameter["name"] == "Idempotency-Key"
         )
-        for operations in paths.values()
-    )
+        assert idempotency["required"] is True
+        assert operation["responses"]["202"]["content"]["application/json"]["schema"] == {
+            "$ref": "#/components/schemas/EnqueueCommandResponse"
+        }
+    assert paths["/api/v1/assets"]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/AssetCreateRequest"}
+    assert paths["/api/v1/assets/{asset_id}"]["patch"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/AssetUpdateRequest"}
+    assert "credentials" not in " ".join(paths).lower()
 
 
 def test_run_binds_loopback_by_default_without_opening_socket(
