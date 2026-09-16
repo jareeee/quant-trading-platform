@@ -9,6 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from quant_platform.api.schemas import (
@@ -293,33 +294,47 @@ def create_app(
 
     @app.post("/api/v1/assets", response_model=AssetResponse, status_code=201)
     def create_asset(request: AssetCreateRequest) -> dict[str, Any]:
-        with session_factory() as session, session.begin():
-            if session.get(ExchangeConfig, request.exchange_config_id) is None:
-                raise HTTPException(status_code=404, detail="exchange configuration not found")
-            row = AssetConfig(**request.model_dump())
-            session.add(row)
-            session.flush()
-            return _asset_payload(row)
+        try:
+            with session_factory() as session, session.begin():
+                if session.get(ExchangeConfig, request.exchange_config_id) is None:
+                    raise HTTPException(
+                        status_code=404, detail="exchange configuration not found"
+                    )
+                row = AssetConfig(**request.model_dump())
+                session.add(row)
+                session.flush()
+                return _asset_payload(row)
+        except IntegrityError:
+            raise HTTPException(
+                status_code=409, detail="asset configuration already exists"
+            ) from None
 
     @app.patch("/api/v1/assets/{asset_id}", response_model=AssetResponse)
     def update_asset(asset_id: int, request: AssetUpdateRequest) -> dict[str, Any]:
-        with session_factory() as session, session.begin():
-            row = session.get(AssetConfig, asset_id)
-            if row is None:
-                raise HTTPException(status_code=404, detail="asset not found")
-            changes = request.model_dump(exclude_unset=True)
-            exchange_id = changes.get("exchange_config_id")
-            if exchange_id is not None and session.get(ExchangeConfig, exchange_id) is None:
-                raise HTTPException(status_code=404, detail="exchange configuration not found")
-            symbol = changes.get("symbol", row.symbol)
-            base_asset = changes.get("base_asset", row.base_asset)
-            quote_asset = changes.get("quote_asset", row.quote_asset)
-            if symbol != f"{base_asset}/{quote_asset}":
-                raise HTTPException(status_code=422, detail="request validation failed")
-            for field, value in changes.items():
-                setattr(row, field, value)
-            session.flush()
-            return _asset_payload(row)
+        try:
+            with session_factory() as session, session.begin():
+                row = session.get(AssetConfig, asset_id)
+                if row is None:
+                    raise HTTPException(status_code=404, detail="asset not found")
+                changes = request.model_dump(exclude_unset=True)
+                exchange_id = changes.get("exchange_config_id")
+                if exchange_id is not None and session.get(ExchangeConfig, exchange_id) is None:
+                    raise HTTPException(
+                        status_code=404, detail="exchange configuration not found"
+                    )
+                symbol = changes.get("symbol", row.symbol)
+                base_asset = changes.get("base_asset", row.base_asset)
+                quote_asset = changes.get("quote_asset", row.quote_asset)
+                if symbol != f"{base_asset}/{quote_asset}":
+                    raise HTTPException(status_code=422, detail="request validation failed")
+                for field, value in changes.items():
+                    setattr(row, field, value)
+                session.flush()
+                return _asset_payload(row)
+        except IntegrityError:
+            raise HTTPException(
+                status_code=409, detail="asset configuration already exists"
+            ) from None
 
     def enqueue_command(
         command_type: str,

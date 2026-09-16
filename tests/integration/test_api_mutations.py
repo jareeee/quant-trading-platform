@@ -398,7 +398,7 @@ def test_unknown_exchange_and_asset_mutations_return_not_found(
         assert session.scalar(select(func.count()).select_from(Command)) == 0
 
 
-def test_configuration_database_failure_is_sanitized_atomic_and_recoverable(
+def test_duplicate_asset_returns_conflict_and_later_mutation_succeeds(
     session_factory: Callable[[], Session], exchange_id: int
 ) -> None:
     add_asset(session_factory, exchange_id)
@@ -422,13 +422,44 @@ def test_configuration_database_failure_is_sanitized_atomic_and_recoverable(
     }
     recovered = error_client.post("/api/v1/assets", json=recovered_payload)
 
-    assert failed.status_code == 500
-    assert failed.json() == {"detail": "internal server error"}
+    assert failed.status_code == 409
+    assert failed.json() == {"detail": "asset configuration already exists"}
     assert "sqlite" not in failed.text.lower()
     assert recovered.status_code == 201
     with session_factory() as session:
         assets = list(session.scalars(select(AssetConfig).order_by(AssetConfig.id)))
         assert [asset.symbol for asset in assets] == ["BTC/USD", "ETH/USD"]
+
+
+def test_update_to_existing_exchange_symbol_returns_conflict(
+    client: TestClient,
+    session_factory: Callable[[], Session],
+    exchange_id: int,
+) -> None:
+    add_asset(session_factory, exchange_id)
+    with session_factory() as session:
+        eth = AssetConfig(
+            exchange_config_id=exchange_id,
+            symbol="ETH/USD",
+            base_asset="ETH",
+            quote_asset="USD",
+            settings={},
+        )
+        session.add(eth)
+        session.commit()
+        eth_id = eth.id
+
+    response = client.patch(
+        f"/api/v1/assets/{eth_id}",
+        json={"symbol": "BTC/USD", "base_asset": "BTC"},
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "asset configuration already exists"}
+    with session_factory() as session:
+        unchanged = session.get_one(AssetConfig, eth_id)
+        assert unchanged.symbol == "ETH/USD"
+        assert unchanged.base_asset == "ETH"
 
 
 def test_paper_close_requires_no_confirmation_body(
