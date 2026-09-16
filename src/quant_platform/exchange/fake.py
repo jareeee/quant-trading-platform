@@ -11,6 +11,7 @@ from quant_platform.exchange.models import (
     MarginMode,
     OrderRequest,
     OrderResult,
+    OrderSide,
     OrderStatus,
     OrderType,
     Position,
@@ -157,7 +158,50 @@ class FakeExchange:
         self._requests_by_client_id[request.client_order_id] = request
         self._orders_by_id[order_id] = result
         self._fills_by_order_id[order_id] = (fill,)
+        self._apply_market_fill(request, price)
         return result
+
+    def _apply_market_fill(self, request: OrderRequest, price: Decimal) -> None:
+        signed_quantity = (
+            request.quantity if request.side is OrderSide.BUY else -request.quantity
+        )
+        existing = next(
+            (position for position in self._positions if position.symbol == request.symbol),
+            None,
+        )
+        if existing is None:
+            updated = Position(
+                symbol=request.symbol,
+                quantity=signed_quantity,
+                entry_price=price,
+                leverage=self._leverage_by_symbol.get(request.symbol, Decimal("1")),
+                margin_mode=self._margin_mode_by_symbol.get(request.symbol, MarginMode.CROSS),
+            )
+            self._positions = (*self._positions, updated)
+            return
+
+        new_quantity = existing.quantity + signed_quantity
+        if new_quantity == 0:
+            new_entry_price = Decimal("0")
+        elif existing.quantity * new_quantity < 0:
+            new_entry_price = price
+        elif existing.quantity * signed_quantity > 0:
+            new_entry_price = (
+                abs(existing.quantity) * existing.entry_price
+                + abs(signed_quantity) * price
+            ) / abs(new_quantity)
+        else:
+            new_entry_price = existing.entry_price
+
+        updated = replace(
+            existing,
+            quantity=new_quantity,
+            entry_price=new_entry_price,
+        )
+        self._positions = tuple(
+            updated if position.symbol == request.symbol else position
+            for position in self._positions
+        )
 
     def cancel_order(self, exchange_order_id: str, symbol: str) -> OrderResult:
         self._record("cancel_order", exchange_order_id, symbol)

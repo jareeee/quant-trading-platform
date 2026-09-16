@@ -105,6 +105,35 @@ def test_market_order_fills_at_latest_close_and_is_idempotent() -> None:
     assert exchange.fetch_order_fills(first.exchange_order_id, "ETH/USDT") == ()
 
 
+def test_market_order_updates_positions() -> None:
+    exchange = make_exchange()
+
+    exchange.submit_order(
+        OrderRequest(
+            "BTC/USDT",
+            OrderSide.BUY,
+            OrderType.MARKET,
+            Decimal("2"),
+            "position-buy",
+        )
+    )
+    exchange.submit_order(
+        OrderRequest(
+            "BTC/USDT",
+            OrderSide.SELL,
+            OrderType.MARKET,
+            Decimal("0.5"),
+            "position-reduce",
+        )
+    )
+
+    position = next(
+        position for position in exchange.fetch_positions() if position.symbol == "BTC/USDT"
+    )
+    assert position.quantity == Decimal("1.5")
+    assert position.entry_price == Decimal("115")
+
+
 def test_limit_order_remains_open_until_canceled() -> None:
     exchange = make_exchange()
     request = OrderRequest(
