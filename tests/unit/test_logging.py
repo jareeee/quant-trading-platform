@@ -53,3 +53,22 @@ def test_setup_logging_recursively_redacts_secrets() -> None:
         "token": "[REDACTED]",
     }
     assert "top-secret-key" not in stream.getvalue()
+
+
+def test_setup_logging_redacts_common_secret_key_variants() -> None:
+    stream = io.StringIO()
+    setup_logging(stream=stream)
+
+    logging.getLogger("quant_platform.test").info(
+        "exchange response",
+        extra={
+            "apiKey": "camel-api-key",
+            "secretKey": "camel-secret",
+            "access_token": "access-token",
+        },
+    )
+
+    event = json.loads(stream.getvalue())
+    assert event["apiKey"] == "[REDACTED]"
+    assert event["secretKey"] == "[REDACTED]"
+    assert event["access_token"] == "[REDACTED]"

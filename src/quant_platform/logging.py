@@ -5,7 +5,19 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TextIO
 
-_SENSITIVE_FIELDS = frozenset({"api_key", "secret", "passphrase", "password", "token"})
+_SENSITIVE_FIELDS = frozenset(
+    {
+        "apikey",
+        "secret",
+        "secretkey",
+        "passphrase",
+        "password",
+        "token",
+        "accesstoken",
+        "refreshtoken",
+        "privatekey",
+    }
+)
 _STANDARD_LOG_RECORD_FIELDS = frozenset(logging.makeLogRecord({}).__dict__) | {
     "asctime",
     "message",
@@ -30,10 +42,18 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(_redact(event), default=str)
 
 
+def _normalized_field_name(key: object) -> str:
+    return "".join(character for character in str(key).lower() if character.isalnum())
+
+
 def _redact(value: object) -> object:
     if isinstance(value, Mapping):
         return {
-            str(key): "[REDACTED]" if str(key).lower() in _SENSITIVE_FIELDS else _redact(item)
+            str(key): (
+                "[REDACTED]"
+                if _normalized_field_name(key) in _SENSITIVE_FIELDS
+                else _redact(item)
+            )
             for key, item in value.items()
         }
     if isinstance(value, (list, tuple)):
