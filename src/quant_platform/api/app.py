@@ -1,33 +1,55 @@
 import ipaddress
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import Body, FastAPI, Header, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, Response
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from quant_platform.api.schemas import (
+    AssetCreateRequest,
     AssetPage,
     AssetResponse,
+    AssetUpdateRequest,
+    CloseCommandRequest,
+    CommandStatusResponse,
+    EmptyCommandRequest,
+    EnqueueCommandResponse,
     FillPage,
     OrderPage,
     PositionPage,
+    ReconcileCommandRequest,
     RunPage,
     StatusResponse,
 )
+from quant_platform.config import TradingMode
 from quant_platform.db.models import (
     AssetConfig,
     Command,
+    ExchangeConfig,
     Fill,
     Heartbeat,
     Order,
     Position,
     StrategyRun,
 )
+from quant_platform.db.repositories import CommandIdempotencyConflictError, CommandRepository
 from quant_platform.db.session import create_engine, create_session_factory
+
+_EMPTY_COMMAND_BODY = Body(default_factory=EmptyCommandRequest)
+_CLOSE_COMMAND_BODY = Body(default_factory=CloseCommandRequest)
+_RECONCILE_COMMAND_BODY = Body(default_factory=ReconcileCommandRequest)
+_IDEMPOTENCY_HEADER = Header(
+    alias="Idempotency-Key",
+    min_length=1,
+    max_length=255,
+    pattern=r".*\S.*",
+)
 
 
 class ApiRuntimeSettings(BaseSettings):
@@ -37,6 +59,7 @@ class ApiRuntimeSettings(BaseSettings):
     trading_api_host: str = "127.0.0.1"
     trading_api_port: int = 8000
     trading_api_unsafe_allow_non_loopback: bool = False
+    trading_mode: TradingMode = TradingMode.PAPER
 
 
 def _timestamp(value: datetime | None) -> str | None:
@@ -47,7 +70,15 @@ def _timestamp(value: datetime | None) -> str | None:
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
-_SECRET_PARTS = ("apikey", "password", "secret", "token", "privatekey", "credential")
+_SECRET_PARTS = (
+    "apikey",
+    "credential",
+    "passphrase",
+    "password",
+    "privatekey",
+    "secret",
+    "token",
+)
 
 
 def _redact(value: Any) -> Any:
@@ -146,14 +177,42 @@ def _fill_payload(fill: Fill) -> dict[str, Any]:
 
 
 def create_app(
-    *, session_factory: Callable[[], Session], clock: Callable[[], datetime]
+    *,
+    session_factory: Callable[[], Session],
+    clock: Callable[[], datetime],
+    trading_mode: TradingMode = TradingMode.PAPER,
 ) -> FastAPI:
     app = FastAPI(title="Quant Trading Platform Read API")
+
+    @app.middleware("http")
+    async def browser_origin_guard(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        origin = request.headers.get("origin")
+        if origin is not None and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            origin_host = urlsplit(origin).hostname
+            request_host = request.url.hostname
+            allowed = origin_host is not None and (
+                _is_loopback(origin_host)
+                or (request_host is not None and origin_host.lower() == request_host.lower())
+            )
+            if not allowed:
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "browser origin is not allowed"},
+                )
+        return await call_next(request)
 
     @app.exception_handler(Exception)
     async def internal_error(request: Request, error: Exception) -> JSONResponse:
         del request, error
         return JSONResponse(status_code=500, content={"detail": "internal server error"})
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(request: Request, error: RequestValidationError) -> JSONResponse:
+        del request, error
+        return JSONResponse(status_code=422, content={"detail": "request validation failed"})
 
     @app.get("/api/v1/status", response_model=StatusResponse)
     def status() -> dict[str, Any]:
@@ -231,6 +290,144 @@ def create_app(
             if row is None:
                 raise HTTPException(status_code=404, detail="asset not found")
             return _asset_payload(row)
+
+    @app.post("/api/v1/assets", response_model=AssetResponse, status_code=201)
+    def create_asset(request: AssetCreateRequest) -> dict[str, Any]:
+        with session_factory() as session, session.begin():
+            if session.get(ExchangeConfig, request.exchange_config_id) is None:
+                raise HTTPException(status_code=404, detail="exchange configuration not found")
+            row = AssetConfig(**request.model_dump())
+            session.add(row)
+            session.flush()
+            return _asset_payload(row)
+
+    @app.patch("/api/v1/assets/{asset_id}", response_model=AssetResponse)
+    def update_asset(asset_id: int, request: AssetUpdateRequest) -> dict[str, Any]:
+        with session_factory() as session, session.begin():
+            row = session.get(AssetConfig, asset_id)
+            if row is None:
+                raise HTTPException(status_code=404, detail="asset not found")
+            changes = request.model_dump(exclude_unset=True)
+            exchange_id = changes.get("exchange_config_id")
+            if exchange_id is not None and session.get(ExchangeConfig, exchange_id) is None:
+                raise HTTPException(status_code=404, detail="exchange configuration not found")
+            symbol = changes.get("symbol", row.symbol)
+            base_asset = changes.get("base_asset", row.base_asset)
+            quote_asset = changes.get("quote_asset", row.quote_asset)
+            if symbol != f"{base_asset}/{quote_asset}":
+                raise HTTPException(status_code=422, detail="request validation failed")
+            for field, value in changes.items():
+                setattr(row, field, value)
+            session.flush()
+            return _asset_payload(row)
+
+    def enqueue_command(
+        command_type: str,
+        idempotency_key: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        try:
+            with session_factory() as session, session.begin():
+                asset_id = payload.get("asset_id")
+                if asset_id is not None and session.get(AssetConfig, asset_id) is None:
+                    raise HTTPException(status_code=404, detail="asset not found")
+                result = CommandRepository(session).enqueue(
+                    command_type=command_type,
+                    idempotency_key=idempotency_key,
+                    payload=payload,
+                    requested_at=clock(),
+                )
+                return {
+                    "id": result.command.id,
+                    "status": result.command.status,
+                    "type": result.command.command_type,
+                    "requested_at": _timestamp(result.command.requested_at),
+                    "outcome": result.outcome.value,
+                }
+        except CommandIdempotencyConflictError:
+            raise HTTPException(
+                status_code=409,
+                detail="idempotency key conflicts with existing command",
+            ) from None
+
+    @app.post(
+        "/api/v1/assets/{asset_id}/commands/pause",
+        response_model=EnqueueCommandResponse,
+        status_code=202,
+    )
+    def pause_asset(
+        asset_id: int,
+        request: EmptyCommandRequest = _EMPTY_COMMAND_BODY,
+        idempotency_key: str = _IDEMPOTENCY_HEADER,
+    ) -> dict[str, Any]:
+        del request
+        return enqueue_command("pause", idempotency_key, {"asset_id": asset_id})
+
+    @app.post(
+        "/api/v1/assets/{asset_id}/commands/resume",
+        response_model=EnqueueCommandResponse,
+        status_code=202,
+    )
+    def resume_asset(
+        asset_id: int,
+        request: EmptyCommandRequest = _EMPTY_COMMAND_BODY,
+        idempotency_key: str = _IDEMPOTENCY_HEADER,
+    ) -> dict[str, Any]:
+        del request
+        return enqueue_command("resume", idempotency_key, {"asset_id": asset_id})
+
+    @app.post(
+        "/api/v1/assets/{asset_id}/commands/close",
+        response_model=EnqueueCommandResponse,
+        status_code=202,
+    )
+    def close_asset(
+        asset_id: int,
+        request: CloseCommandRequest = _CLOSE_COMMAND_BODY,
+        idempotency_key: str = _IDEMPOTENCY_HEADER,
+    ) -> dict[str, Any]:
+        with session_factory() as session:
+            if session.get(AssetConfig, asset_id) is None:
+                raise HTTPException(status_code=404, detail="asset not found")
+        expected = f"CLOSE {asset_id}"
+        if trading_mode is TradingMode.LIVE and request.confirmation != expected:
+            raise HTTPException(
+                status_code=409,
+                detail=f"confirmation must exactly match {expected}",
+            )
+        return enqueue_command(
+            "close",
+            idempotency_key,
+            {"asset_id": asset_id, "trading_mode": trading_mode.value},
+        )
+
+    @app.post(
+        "/api/v1/core/commands/reconcile",
+        response_model=EnqueueCommandResponse,
+        status_code=202,
+    )
+    def reconcile_core(
+        request: ReconcileCommandRequest = _RECONCILE_COMMAND_BODY,
+        idempotency_key: str = _IDEMPOTENCY_HEADER,
+    ) -> dict[str, Any]:
+        return enqueue_command(
+            "reconcile", idempotency_key, {"asset_id": request.asset_id}
+        )
+
+    @app.get("/api/v1/commands/{command_id}", response_model=CommandStatusResponse)
+    def command_status(command_id: int) -> dict[str, Any]:
+        with session_factory() as session:
+            command = session.get(Command, command_id)
+            if command is None:
+                raise HTTPException(status_code=404, detail="command not found")
+            return {
+                "id": command.id,
+                "status": command.status,
+                "type": command.command_type,
+                "requested_at": _timestamp(command.requested_at),
+                "processed_at": _timestamp(command.processed_at),
+                "error": "command processing failed" if command.error is not None else None,
+            }
 
     @app.get("/api/v1/positions", response_model=PositionPage)
     def positions(
@@ -330,5 +527,6 @@ def run(
     app = create_app(
         session_factory=create_session_factory(engine),
         clock=lambda: datetime.now(UTC),
+        trading_mode=settings.trading_mode,
     )
     uvicorn.run(app, host=selected_host, port=settings.trading_api_port)
