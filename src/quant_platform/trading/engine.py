@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from quant_platform.db.models import Order, Signal, StrategyRun
 from quant_platform.db.repositories import CreateOutcome, FillRepository, StrategyRunRepository
-from quant_platform.exchange import Exchange, OrderRequest, OrderSide, OrderType
+from quant_platform.exchange import Exchange, OrderRequest, OrderSide, OrderStatus, OrderType
 from quant_platform.strategies import SignalDecision, Strategy, StrategyContext
 from quant_platform.trading.execution import validate_close_order
 from quant_platform.trading.risk import (
@@ -188,6 +188,14 @@ class TradingEngine:
             return self._reject(run, "; ".join(risk.reasons))
 
         exchange_order = self._exchange.submit_order(order_request)
+        if (
+            exchange_order.client_order_id != order_request.client_order_id
+            or exchange_order.symbol != order_request.symbol
+            or exchange_order.side is not order_request.side
+            or exchange_order.order_type is not order_request.order_type
+            or exchange_order.quantity != order_request.quantity
+        ):
+            raise RuntimeError("exchange order identity does not match submitted request")
         exchange_fills = self._exchange.fetch_order_fills(
             exchange_order.exchange_order_id, request.context.symbol
         )
@@ -203,6 +211,11 @@ class TradingEngine:
         fill_quantity = sum((fill.quantity for fill in exchange_fills), Decimal("0"))
         if fill_quantity != exchange_order.filled_quantity:
             raise RuntimeError("authoritative fills do not match order filled quantity")
+        if (
+            exchange_order.status is not OrderStatus.FILLED
+            or exchange_order.filled_quantity != order_request.quantity
+        ):
+            raise RuntimeError("market order is not fully filled")
 
         order = Order(
             exchange_config_id=request.exchange_config_id,

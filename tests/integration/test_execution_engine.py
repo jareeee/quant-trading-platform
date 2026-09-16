@@ -20,7 +20,7 @@ from quant_platform.db.models import (
     Fill as PersistedFill,
 )
 from quant_platform.db.session import create_engine, create_session_factory
-from quant_platform.exchange import Candle, FakeExchange, Position
+from quant_platform.exchange import Candle, FakeExchange, OrderStatus, Position
 from quant_platform.strategies import SignalDecision, StrategyContext, StrategySignal
 from quant_platform.trading import (
     ExecutionRequest,
@@ -64,6 +64,31 @@ class QuantityMismatchExchange(FakeExchange):
     def fetch_order_fills(self, exchange_order_id: str, symbol: str):  # type: ignore[no-untyped-def]
         fills = super().fetch_order_fills(exchange_order_id, symbol)
         return (replace(fills[0], quantity=Decimal("1")),)
+
+
+class PartialFillExchange(FakeExchange):
+    def submit_order(self, request):  # type: ignore[no-untyped-def]
+        result = super().submit_order(request)
+        partial_quantity = request.quantity / Decimal("2")
+        partial_result = replace(
+            result,
+            status=OrderStatus.OPEN,
+            filled_quantity=partial_quantity,
+        )
+        self._orders_by_id[result.exchange_order_id] = partial_result
+        fill = self._fills_by_order_id[result.exchange_order_id][0]
+        self._fills_by_order_id[result.exchange_order_id] = (
+            replace(fill, quantity=partial_quantity),
+        )
+        return partial_result
+
+
+class WrongOrderIdentityExchange(FakeExchange):
+    def submit_order(self, request):  # type: ignore[no-untyped-def]
+        result = super().submit_order(request)
+        wrong_result = replace(result, client_order_id="wrong-client-id")
+        self._orders_by_id[result.exchange_order_id] = wrong_result
+        return wrong_result
 
 
 @pytest.fixture
@@ -350,6 +375,38 @@ def test_fill_quantity_must_match_authoritative_order_result(
     result = engine(session, strategy, exchange).execute(request(asset))
 
     assert result.status is ExecutionStatus.FAILED
+    assert session.scalars(select(Order)).all() == []
+    assert session.scalars(select(PersistedFill)).all() == []
+
+
+def test_partial_market_fill_is_not_reported_as_success(
+    session: Session, asset: AssetConfig
+) -> None:
+    strategy = StubStrategy(signal(SignalDecision.LONG))
+    exchange = PartialFillExchange(
+        candles={(SYMBOL, "1h"): (candle(),)}, clock=lambda: NOW
+    )
+
+    result = engine(session, strategy, exchange).execute(request(asset))
+
+    assert result.status is ExecutionStatus.FAILED
+    assert session.get_one(StrategyRun, result.run_id).status == "failed"
+    assert session.scalars(select(Order)).all() == []
+    assert session.scalars(select(PersistedFill)).all() == []
+
+
+def test_exchange_order_identity_must_match_submitted_request(
+    session: Session, asset: AssetConfig
+) -> None:
+    strategy = StubStrategy(signal(SignalDecision.LONG))
+    exchange = WrongOrderIdentityExchange(
+        candles={(SYMBOL, "1h"): (candle(),)}, clock=lambda: NOW
+    )
+
+    result = engine(session, strategy, exchange).execute(request(asset))
+
+    assert result.status is ExecutionStatus.FAILED
+    assert session.get_one(StrategyRun, result.run_id).status == "failed"
     assert session.scalars(select(Order)).all() == []
     assert session.scalars(select(PersistedFill)).all() == []
 
