@@ -268,6 +268,16 @@ class Reconciler:
                         )
                     )
                 )
+                local_only_fill_ids = sorted(
+                    fill.exchange_fill_id
+                    for fill in persisted_fills
+                    if fill.exchange_fill_id not in seen_fill_ids
+                )
+                if local_only_fill_ids:
+                    raise ReconciliationError(
+                        "local fill missing from exchange: "
+                        + ", ".join(local_only_fill_ids)
+                    )
                 cumulative = sum(
                     (fill.quantity for fill in persisted_fills), Decimal("0")
                 )

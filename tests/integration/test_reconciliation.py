@@ -517,6 +517,48 @@ def test_filled_status_without_full_authoritative_fills_is_rejected(
     assert local.filled_quantity == Decimal("2")
 
 
+def test_local_fill_missing_from_authoritative_exchange_history_is_rejected(
+    session: Session, configured: tuple[ExchangeConfig, AssetConfig, AssetConfig]
+) -> None:
+    exchange_config, _, _ = configured
+    local_order = Order(
+        exchange_config_id=exchange_config.id,
+        client_order_id="client-1",
+        exchange_order_id="order-1",
+        symbol=BTC,
+        side="buy",
+        order_type="limit",
+        status="open",
+        quantity=Decimal("2"),
+        price=Decimal("99"),
+        filled_quantity=Decimal("2"),
+        submitted_at=NOW,
+    )
+    session.add(local_order)
+    session.flush()
+    session.add(
+        Fill(
+            order_id=local_order.id,
+            exchange_fill_id="local-only-fill",
+            quantity=Decimal("2"),
+            price=Decimal("100"),
+            fee_amount=Decimal("0.1"),
+            fee_currency="USD",
+            executed_at=NOW,
+        )
+    )
+    session.commit()
+    exchange = SnapshotExchange(open_orders=(remote_order(),), fills=())
+
+    with pytest.raises(ReconciliationError, match="local fill missing from exchange"):
+        Reconciler(session, exchange, exchange_config.id).reconcile()
+
+    session.refresh(local_order)
+    assert local_order.status == "open"
+    assert local_order.filled_quantity == Decimal("2")
+    assert session.scalars(select(Fill)).one().exchange_fill_id == "local-only-fill"
+
+
 def test_existing_fill_id_with_changed_execution_time_is_rejected(
     session: Session, configured: tuple[ExchangeConfig, AssetConfig, AssetConfig]
 ) -> None:
