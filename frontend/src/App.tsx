@@ -1,12 +1,9 @@
 import { Link, NavLink, Route, Routes } from 'react-router-dom'
 
+import { CommandsPage } from './pages/CommandsPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { AssetsPage } from './pages/AssetsPage'
 import { AssetDetailPage } from './pages/AssetDetailPage'
-
-function PlaceholderPage({ title }: { title: string }) {
-  return <h1 className="text-2xl font-semibold">{title}</h1>
-}
 
 function NotFoundPage() {
   return (
@@ -43,7 +40,7 @@ export function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/assets" element={<AssetsPage />} />
           <Route path="/assets/:assetId" element={<AssetDetailPage />} />
-          <Route path="/commands" element={<PlaceholderPage title="Commands" />} />
+          <Route path="/commands" element={<CommandsPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </main>

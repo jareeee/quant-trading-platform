@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, ApiResponseError, apiClient } from './client'
+import { ApiError, ApiNetworkError, ApiResponseError, apiClient } from './client'
 
 interface StatusResponse {
   status: string
@@ -49,6 +49,47 @@ describe('apiClient', () => {
         status: 503,
       }),
     )
+  })
+
+  it('posts JSON with a caller-supplied idempotency key', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: 9, status: 'pending' }), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await apiClient.post<{ id: number; status: string }>(
+      '/assets/7/commands/pause',
+      {},
+      { idempotencyKey: 'intent-123' },
+    )
+
+    expect(result).toEqual({ id: 9, status: 'pending' })
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/assets/7/commands/pause', {
+      body: '{}',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'intent-123',
+      },
+      method: 'POST',
+    })
+  })
+
+  it('replaces raw network failures with a credential-safe typed error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('token=secret host=/private/path')))
+
+    const request = apiClient.post('/core/commands/reconcile', { asset_id: null }, { idempotencyKey: 'network-attempt' })
+
+    await expect(request).rejects.toEqual(
+      expect.objectContaining<ApiNetworkError>({
+        message: 'API network request failed',
+        name: 'ApiNetworkError',
+      }),
+    )
+    await expect(request).rejects.not.toHaveProperty('message', expect.stringContaining('secret'))
   })
 
   it('throws a typed response error when successful JSON is malformed', async () => {

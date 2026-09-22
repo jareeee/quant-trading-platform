@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from './App'
 
@@ -10,10 +10,13 @@ function renderApp(path: string) {
 }
 
 describe('application shell', () => {
-  it('renders semantic primary navigation in the command placeholder', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('renders semantic primary navigation on the command page', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [], limit: 100, offset: 0, total: 0 }), { status: 200 })))
     renderApp('/commands')
 
-    expect(screen.getByRole('heading', { name: 'Commands' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Durable commands' })).toBeInTheDocument()
     const navigation = screen.getByRole('navigation', { name: 'Primary navigation' })
     expect(navigation).toContainElement(screen.getByRole('link', { name: 'Dashboard' }))
     expect(navigation).toContainElement(screen.getByRole('link', { name: 'Assets' }))
