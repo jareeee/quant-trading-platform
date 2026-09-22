@@ -8,10 +8,25 @@ export function formatDate(value: string | null): string {
 }
 
 export function formatDecimal(value: string, maximumFractionDigits = 2): string {
-  return new Intl.NumberFormat('en-US', {
-    maximumFractionDigits,
-    minimumFractionDigits: 2,
-  }).format(Number(value))
+  if (!Number.isInteger(maximumFractionDigits) || maximumFractionDigits < 2) return '—'
+
+  const match = /^([+-]?)(\d+)(?:\.(\d*))?$/.exec(value)
+  if (!match) return '—'
+
+  const [, sign, integerDigits = '0', fractionDigits = ''] = match
+  const scale = 10n ** BigInt(maximumFractionDigits)
+  const paddedFraction = fractionDigits.padEnd(maximumFractionDigits + 1, '0')
+  const keptFraction = paddedFraction.slice(0, maximumFractionDigits)
+  const shouldRoundUp = (paddedFraction.at(maximumFractionDigits) ?? '0') >= '5'
+  let scaled = BigInt(integerDigits) * scale + BigInt(keptFraction || '0')
+  if (shouldRoundUp) scaled += 1n
+
+  const whole = scaled / scale
+  let fraction = (scaled % scale).toString().padStart(maximumFractionDigits, '0')
+  while (fraction.length > 2 && fraction.endsWith('0')) fraction = fraction.slice(0, -1)
+
+  const prefix = sign === '-' && scaled !== 0n ? '-' : ''
+  return `${prefix}${whole.toLocaleString('en-US')}.${fraction}`
 }
 
 export function isNonzeroDecimal(value: string): boolean {
