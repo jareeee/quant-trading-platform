@@ -16,6 +16,8 @@ TRADING_MODE=paper .venv/bin/trading-core check
 
 The installer requires macOS, an executable `.venv/bin/trading-core`, a valid `.env`/Settings configuration, an existing current Alembic schema, and `TRADING_MODE=paper`. The current core supports paper mode only. The installer runs the non-mutating `trading-core check`; it does **not** run Alembic, process queued commands, execute a trading iteration, submit an order, or publish a heartbeat.
 
+The repository must be outside `~/Desktop`, `~/Documents`, and `~/Downloads`. A per-user LaunchAgent does not inherit Terminal's Files and Folders privacy grant, so a project in those directories can pass an interactive check but fail to read its own virtual environment after launch. Prefer a checkout such as `~/quant-trading-platform`; the installer rejects protected locations before it changes launchd state. Granting Full Disk Access is not the default installation path.
+
 ## Install or update
 
 Run as the logged-in desktop user from any directory:
@@ -30,7 +32,7 @@ The script derives the repository path from its own location, so spaces and XML-
 ~/Library/LaunchAgents/com.quant-platform.core.plist
 ```
 
-It then uses `launchctl bootstrap gui/$UID` and verifies the exact service with `launchctl print`. Re-running the installer safely replaces and re-bootstraps that same label.
+It then uses `launchctl bootstrap gui/$UID` and verifies the exact service with `launchctl print`. Re-running the installer asks the existing core to stop with a scoped SIGTERM, waits up to five seconds, and only then replaces and re-bootstraps that same label.
 
 ## Status and control
 
@@ -59,4 +61,4 @@ The single-instance lock is under `~/Library/Application Support/quant-platform/
 ./deploy/macos/uninstall.sh
 ```
 
-The uninstaller uses `launchctl bootout gui/$UID/com.quant-platform.core` only when that exact agent is loaded, then removes only its installed plist. It is idempotent. It does not remove `.env`, the database, logs, lock files, credentials, the virtual environment, or the project.
+The uninstaller asks the exact agent to stop with a scoped SIGTERM, waits up to five seconds for its process to exit, and then uses `launchctl bootout gui/$UID/com.quant-platform.core` before removing only its installed plist. It is idempotent. It does not remove `.env`, the database, logs, lock files, credentials, the virtual environment, or the project.

@@ -20,7 +20,32 @@ die() {
   exit 1
 }
 
+stop_loaded_agent() {
+  launchctl kill SIGTERM "$DOMAIN/$LABEL" >/dev/null 2>&1 || true
+  attempts=0
+  while [ "$attempts" -lt 50 ]; do
+    state=$(launchctl print "$DOMAIN/$LABEL" 2>/dev/null || true)
+    case "$state" in
+      *"pid ="*)
+        sleep 0.1
+        attempts=$((attempts + 1))
+        ;;
+      *) return 0 ;;
+    esac
+  done
+  return 1
+}
+
 [ "$(uname -s)" = "Darwin" ] || die "macOS is required"
+
+# User LaunchAgents do not inherit Terminal's Files and Folders privacy grant.
+# A checkout here can pass an interactive preflight and then crash-loop under launchd.
+case "$ROOT/" in
+  "$HOME/Desktop/"*|"$HOME/Documents/"*|"$HOME/Downloads/"*)
+    die "project is inside a macOS-protected directory; move the checkout outside Desktop, Documents, or Downloads"
+    ;;
+esac
+
 [ -f "$TEMPLATE" ] || die "launchd template is missing"
 [ -f "$RENDERER" ] || die "plist renderer is missing"
 [ -x "$EXECUTABLE" ] || die "install the project virtualenv; trading-core is not executable"
@@ -72,6 +97,9 @@ if [ -f "$TARGET" ]; then
 fi
 
 if [ "$was_loaded" -eq 1 ]; then
+  if ! stop_loaded_agent; then
+    die "existing user agent did not stop gracefully"
+  fi
   if ! launchctl bootout "$DOMAIN/$LABEL" >/dev/null 2>&1; then
     die "could not stop the existing user agent"
   fi

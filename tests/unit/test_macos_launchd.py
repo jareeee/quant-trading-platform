@@ -168,6 +168,29 @@ def test_renderer_rejects_relative_paths_and_unknown_placeholders(tmp_path: Path
     assert not output.exists()
 
 
+def test_installer_rejects_macos_tcc_protected_project_path_before_preflight(
+    tmp_path: Path,
+) -> None:
+    root, environment, log = _isolated_install_tree(tmp_path)
+    protected_root = Path(environment["HOME"]) / "Documents" / "quant-platform"
+    protected_root.parent.mkdir(parents=True)
+    shutil.move(root, protected_root)
+    environment["EXPECTED_ROOT"] = str(protected_root)
+
+    result = subprocess.run(
+        [str(protected_root / "deploy" / "macos" / "install.sh")],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "macOS-protected directory" in result.stderr
+    assert not log.exists()
+    assert not (Path(environment["HOME"]) / "Library").exists()
+
+
 def test_installer_check_failure_never_calls_launchctl_or_mutates_home(tmp_path: Path) -> None:
     root, environment, log = _isolated_install_tree(tmp_path)
     environment["CORE_CHECK_FAIL"] = "1"
@@ -208,8 +231,9 @@ def test_installer_is_idempotent_and_renders_space_safe_absolute_paths(tmp_path:
     lines = log.read_text().splitlines()
     assert lines.count("trading-core:check") == 2
     assert lines.count("launchctl:bootstrap gui/501 " + str(target)) == 2
+    assert lines.count("launchctl:kill SIGTERM gui/501/com.quant-platform.core") == 1
     assert lines.count("launchctl:bootout gui/501/com.quant-platform.core") == 1
-    assert lines.count("launchctl:print gui/501/com.quant-platform.core") == 4
+    assert lines.count("launchctl:print gui/501/com.quant-platform.core") >= 4
 
 
 def test_installer_restores_existing_service_when_atomic_replace_fails(tmp_path: Path) -> None:
@@ -259,5 +283,9 @@ def test_uninstaller_is_idempotent_and_preserves_user_data(tmp_path: Path) -> No
     assert not target.exists()
     assert all(path.read_text() == "preserve" for path in preserved)
     lines = log.read_text().splitlines()
+    assert lines.count("launchctl:kill SIGTERM gui/501/com.quant-platform.core") == 1
     assert lines.count("launchctl:bootout gui/501/com.quant-platform.core") == 1
-    assert all("kill" not in line and "system/" not in line for line in lines)
+    assert lines.index("launchctl:kill SIGTERM gui/501/com.quant-platform.core") < lines.index(
+        "launchctl:bootout gui/501/com.quant-platform.core"
+    )
+    assert all("system/" not in line for line in lines)
