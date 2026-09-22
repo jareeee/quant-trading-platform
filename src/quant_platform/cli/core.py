@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from pydantic import ValidationError
 
 from quant_platform.config import Settings
 from quant_platform.core.daemon import AlreadyRunningError, CoreDaemon, InstanceLock
@@ -33,6 +34,24 @@ def _parse_at(value: str | None) -> datetime:
 def _configuration_error(error: Exception) -> None:
     typer.echo(str(error), err=True)
     raise typer.Exit(code=1)
+
+
+@app.command()
+def check() -> None:
+    """Validate safe settings, the database schema, and core composition."""
+    try:
+        core = build_paper_core(settings=Settings())
+        core.close()
+    except ValidationError:
+        _configuration_error(ValueError("invalid core configuration"))
+        return
+    except (CoreConfigurationError, ValueError) as error:
+        _configuration_error(error)
+        return
+    except Exception:
+        _configuration_error(ValueError("invalid core configuration"))
+        return
+    typer.echo("configuration and schema are ready")
 
 
 @app.command()
