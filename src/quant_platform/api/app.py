@@ -28,7 +28,7 @@ from quant_platform.api.schemas import (
     RunPage,
     StatusResponse,
 )
-from quant_platform.config import TradingMode
+from quant_platform.config import DEFAULT_DATABASE_URL, TradingMode
 from quant_platform.db.models import (
     AssetConfig,
     Command,
@@ -56,7 +56,7 @@ _IDEMPOTENCY_HEADER = Header(
 class ApiRuntimeSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    database_url: str = "sqlite:///quant-trading-platform.db"
+    database_url: str = DEFAULT_DATABASE_URL
     trading_api_host: str = "127.0.0.1"
     trading_api_port: int = 8000
     trading_api_unsafe_allow_non_loopback: bool = False
