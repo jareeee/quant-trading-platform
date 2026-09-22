@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 import { apiClient } from '../api/client'
 import type { Asset, CommandEnqueueResponse, CommandStatusResponse } from '../api/domain'
@@ -40,18 +40,25 @@ export function CommandsPage() {
   const [commandId, setCommandId] = useState<number | null>(null)
   const [closeOpen, setCloseOpen] = useState(false)
   const [closeConfirmation, setCloseConfirmation] = useState('')
+  const pollAttempts = useRef(0)
+  const [pollAttemptCount, setPollAttemptCount] = useState(0)
   const assets = assetsQuery.data?.items ?? []
   const selectedAsset = assets.find((asset) => asset.id === selectedId) ?? assets[0] ?? null
 
   const commandQuery = useQuery({
     queryKey: ['command', commandId],
-    queryFn: () => apiClient.get<CommandStatusResponse>(`/commands/${commandId}`),
+    queryFn: () => {
+      pollAttempts.current += 1
+      setPollAttemptCount(pollAttempts.current)
+      return apiClient.get<CommandStatusResponse>(`/commands/${commandId}`)
+    },
     enabled: commandId !== null,
     retry: false,
     refetchInterval: (query) => {
+      if (query.state.status === 'error') return false
       const status = query.state.data?.status
       if (status === 'completed' || status === 'failed') return false
-      return query.state.dataUpdateCount < MAX_POLL_ATTEMPTS ? POLL_INTERVAL_MS : false
+      return pollAttempts.current < MAX_POLL_ATTEMPTS ? POLL_INTERVAL_MS : false
     },
   })
 
@@ -64,8 +71,14 @@ export function CommandsPage() {
         { idempotencyKey: crypto.randomUUID() },
       )
     },
-    onMutate: () => setCommandId(null),
+    onMutate: () => {
+      pollAttempts.current = 0
+      setPollAttemptCount(0)
+      setCommandId(null)
+    },
     onSuccess: (response) => {
+      pollAttempts.current = 0
+      setPollAttemptCount(0)
       setCommandId(response.id)
       setCloseOpen(false)
       setCloseConfirmation('')
@@ -75,6 +88,9 @@ export function CommandsPage() {
   const commandInFlight = commandId !== null && (
     commandQuery.data === undefined || ['pending', 'processing'].includes(commandQuery.data.status)
   )
+  const pollingLimitReached = commandQuery.data !== undefined
+    && ['pending', 'processing'].includes(commandQuery.data.status)
+    && pollAttemptCount >= MAX_POLL_ATTEMPTS
   const controlsLocked = mutation.isPending || commandInFlight
 
   if (assetsQuery.isPending) return <LoadingPanel label="Loading command controls" />
@@ -230,7 +246,24 @@ export function CommandsPage() {
               >Retry submission</button>}
             </div>}
             {mutation.isSuccess && <p className="mt-4 text-sm font-medium text-[#b39aff]">Command accepted</p>}
-            {commandQuery.isError && <p className="mt-3 text-sm text-red-300" role="alert">Command status could not be loaded.</p>}
+            {commandQuery.isError && <div className="mt-3" role="alert">
+              <p className="text-sm text-red-300">Command status could not be loaded.</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">The command may still be running. Submit controls remain locked to prevent a duplicate intent.</p>
+              <button
+                className="mt-3 rounded-lg border border-[#51417d] bg-[#17132a] px-3 py-2 text-sm font-semibold text-[#b39aff] hover:bg-[#1d1735]"
+                onClick={() => { pollAttempts.current = 0; setPollAttemptCount(0); void commandQuery.refetch() }}
+                type="button"
+              >Retry command status</button>
+            </div>}
+            {pollingLimitReached && !commandQuery.isError && <div className="mt-3" role="alert">
+              <p className="text-sm text-amber-300">Automatic status polling paused.</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">The command is still non-terminal after two minutes. Submit controls remain locked to prevent a duplicate intent.</p>
+              <button
+                className="mt-3 rounded-lg border border-[#51417d] bg-[#17132a] px-3 py-2 text-sm font-semibold text-[#b39aff] hover:bg-[#1d1735]"
+                onClick={() => { pollAttempts.current = 0; setPollAttemptCount(0); void commandQuery.refetch() }}
+                type="button"
+              >Retry command status</button>
+            </div>}
             {commandQuery.data && (
               <div className="mt-4 rounded-lg border border-[#29344a] bg-[#0d131e] p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Command #{commandQuery.data.id} · {commandQuery.data.type}</p>

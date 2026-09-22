@@ -217,6 +217,40 @@ describe('commands page', () => {
     expect(keys.every((key) => typeof key === 'string' && key.length > 0)).toBe(true)
   })
 
+  it('stops automatic polling after a status error and retries only the status check', async () => {
+    const user = userEvent.setup()
+    let statusAttempts = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/v1/assets?limit=100') {
+        return jsonResponse({ items: [asset], limit: 100, offset: 0, total: 1 })
+      }
+      if (path === '/api/v1/assets/7/commands/pause' && init?.method === 'POST') {
+        return jsonResponse({ id: 91, status: 'pending', type: 'pause', requested_at: '2026-09-22T10:00:00Z', outcome: 'created' }, 202)
+      }
+      if (path === '/api/v1/commands/91') {
+        statusAttempts += 1
+        if (statusAttempts === 1) return jsonResponse({ detail: 'token=do-not-render' }, 503)
+        return jsonResponse({ id: 91, status: 'completed', type: 'pause', requested_at: '2026-09-22T10:00:00Z', processed_at: '2026-09-22T10:00:01Z', error: null })
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderCommands()
+    await screen.findByRole('heading', { name: 'Durable commands' })
+
+    await user.click(screen.getByRole('button', { name: 'Pause BTC/USDT' }))
+    expect(await screen.findByText('Command status could not be loaded.')).toBeInTheDocument()
+    expect(document.body).not.toHaveTextContent('do-not-render')
+    expect(screen.getByRole('button', { name: 'Pause BTC/USDT' })).toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: 'Retry command status' }))
+
+    expect(await screen.findByText('Completed successfully')).toBeInTheDocument()
+    expect(statusAttempts).toBe(2)
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
+  })
+
   it('enqueues pause with the exact contract then polls pending through processing to success', async () => {
     const user = userEvent.setup()
     const statuses = ['pending', 'processing', 'completed']
