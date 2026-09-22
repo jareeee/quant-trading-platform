@@ -31,6 +31,23 @@ export interface Asset {
   updated_at: string
 }
 
+export interface CommandEnqueueResponse {
+  id: number
+  status: string
+  type: string
+  requested_at: string
+  outcome: 'created' | 'duplicate'
+}
+
+export interface CommandStatusResponse {
+  id: number
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  type: string
+  requested_at: string
+  processed_at: string | null
+  error: string | null
+}
+
 export interface Position {
   id: number
   exchange_config_id: number
