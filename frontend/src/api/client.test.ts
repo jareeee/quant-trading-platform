@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError, ApiResponseError, apiClient } from './client'
 
-interface HealthResponse {
+interface StatusResponse {
   status: string
 }
 
@@ -20,10 +20,10 @@ describe('apiClient', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await apiClient.get<HealthResponse>('/health')
+    const result = await apiClient.get<StatusResponse>('/status')
 
     expect(result).toEqual({ status: 'ok' })
-    expect(fetchMock).toHaveBeenCalledWith('/api/v1/health', {
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/status', {
       headers: { Accept: 'application/json' },
       method: 'GET',
     })
@@ -40,7 +40,7 @@ describe('apiClient', () => {
       ),
     )
 
-    const request = apiClient.get<HealthResponse>('/health')
+    const request = apiClient.get<StatusResponse>('/status')
 
     await expect(request).rejects.toEqual(
       expect.objectContaining<ApiError>({
@@ -62,7 +62,7 @@ describe('apiClient', () => {
       ),
     )
 
-    const request = apiClient.get<HealthResponse>('/health')
+    const request = apiClient.get<StatusResponse>('/status')
 
     await expect(request).rejects.toEqual(
       expect.objectContaining<ApiResponseError>({
