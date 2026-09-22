@@ -12,8 +12,8 @@ from quant_platform.config import Settings
 
 
 def test_core_and_api_share_default_database_contract() -> None:
-    core = Settings(_env_file=None)
-    api = ApiRuntimeSettings(_env_file=None)
+    core = Settings.model_construct()
+    api = ApiRuntimeSettings.model_construct()
 
     assert core.database_url == api.database_url
 

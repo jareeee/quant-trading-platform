@@ -83,7 +83,6 @@ def migrated_database(tmp_path: Path) -> Iterator[tuple[str, Engine, Callable[..
 
 def build(database_url: str) -> PaperCore:
     settings = Settings(
-        _env_file=None,
         trading_mode=TradingMode.PAPER,
         database_url=database_url,
     )
@@ -135,7 +134,6 @@ def test_non_paper_mode_is_rejected_before_exchange_creation(tmp_path: Path) -> 
         return FakeExchange()
 
     settings = Settings(
-        _env_file=None,
         trading_mode=TradingMode.TESTNET,
         database_url=f"sqlite:///{tmp_path / 'must-not-open.db'}",
     )
