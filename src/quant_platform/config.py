@@ -3,6 +3,8 @@ from enum import StrEnum
 from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+DEFAULT_DATABASE_URL = "sqlite:///data/trading.db"
+
 
 class TradingMode(StrEnum):
     PAPER = "paper"
@@ -14,7 +16,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     trading_mode: TradingMode = TradingMode.PAPER
-    database_url: str = "sqlite:///data/trading.db"
+    database_url: str = DEFAULT_DATABASE_URL
     log_level: str = "INFO"
     live_trading_enabled: bool = False
     exchange_api_key: SecretStr | None = None

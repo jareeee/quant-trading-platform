@@ -54,6 +54,12 @@ class FakeExchange:
     def calls(self) -> tuple[ExchangeCall, ...]:
         return tuple(self._calls)
 
+    def set_closed_candles(
+        self, symbol: str, timeframe: str, candles: Iterable[Candle]
+    ) -> None:
+        """Set explicit synthetic paper data without performing network I/O."""
+        self._candles[(symbol, timeframe)] = tuple(candles)
+
     def inject_failure(self, method: str, error: Exception, *, times: int = 1) -> None:
         if times <= 0:
             raise ValueError("times must be positive")
