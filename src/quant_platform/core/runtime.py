@@ -4,10 +4,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import Engine, inspect, select, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from quant_platform.config import Settings, TradingMode
@@ -438,6 +440,15 @@ def build_paper_core(
     """Compose the core after enforcing mode and migration safety gates."""
     if settings.trading_mode is not TradingMode.PAPER:
         raise ValueError("Task 21 core supports paper mode only")
+    database_url = make_url(settings.database_url)
+    if database_url.drivername.startswith("sqlite"):
+        database = database_url.database
+        if (
+            database is not None
+            and database not in ("", ":memory:")
+            and not Path(database).is_file()
+        ):
+            raise CoreConfigurationError("database schema is missing; run alembic upgrade head")
     engine = create_engine(settings.database_url)
     try:
         _validate_schema(engine)
